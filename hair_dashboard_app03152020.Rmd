@@ -1,0 +1,395 @@
+---
+title: "Hair simulation"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    social: menu
+    source_code: embed
+  html_document:
+    df_print: paged
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(mvtnorm)
+library(tidyverse)
+library(zoo)
+library(plotly)
+library(DT)
+# Creates ? Help Popups
+helpPopup <- function(title) {
+  tagList(
+    tags$a(
+      href='#', title=title, 
+      `data-toggle`='popover', `data-animation`=TRUE,
+      `data-placement`='right', `data-trigger`='hover',
+      
+      tags$i(class='glyphicon glyphicon-question-sign')
+    )
+  )
+} # END helpPopup
+
+#function for generating the simulation data
+sim_data_generate = function(beta1 = 1,beta2 = 1,sigma1 = 10,sigma2 = 11,
+                             sigma3 = 12,sigmae = 1,rho12 = 0.5,
+                             rho13 = 0.55,rho23 = 0.6,step = 0.1,
+                             window_width = 5,stress_start = c(20,20),
+                             stress_length = c(0.1,10), stress_strength = c(100,10),
+                             thres = 1900,n=100,
+                             seed_num = 2019){
+  set.seed(seed_num)
+  #Correlation matrix
+  R <- matrix(numeric(3*3), nrow = 3)   # will be the correlation matrix
+  diag(R) <- 1                        # set diagonal to 1
+  R[upper.tri(R)] <- c(rho12, rho13, rho23)       # fill in to upper right
+  R[lower.tri(R)] <- c(rho12, rho13, rho23)       # fill in to lower left
+  #Covairance matrix
+  G = diag(c(sigma1,sigma2,sigma3)) %*% R %*% diag(c(sigma1,sigma2,sigma3))
+  #Stress data for one hair
+  stress_data = tibble(age = seq(from = step, to = 100, by = step))
+  for(i in 1:length(stress_strength)){#loop over different stress period
+    stress_data_v = tibble(stress_raw = c(rep(0,stress_start[i]/step), 
+                                        rep(stress_strength[i],stress_length[i]/step),#stress period
+                                        rep(0,(100 - stress_start[i] - stress_length[i])/step)
+                         )) %>% 
+      #Cumulative sum of a window using window function rollapply
+      mutate(stress_window = rollapply(stress_raw, width = window_width, 
+                                       by = 1, FUN = sum, align = "right", fill = 0)) %>% 
+      select(!!paste("stress_window",i,sep = "") := stress_window)
+    stress_data = bind_cols(stress_data, stress_data_v)
+  }
+
+  stress_data = stress_data %>% 
+    mutate(stress_window = rowSums(.[2:ncol(stress_data)])) %>% select(age, stress_window)
+    
+                           
+ 
+  
+  #Generate data for 100,000 * 20 = 2,000,000
+  time_point = length(seq(from = step, to = 100, by = step)) # number of time points
+  stress_data_all = do.call("rbind", replicate(n, stress_data, simplify = FALSE)) %>% 
+    bind_cols(id = rep(1:n, each = time_point))#stress data for all hair
+  sim_data = as_tibble(data.frame(id = 1:n, rmvnorm(n, rep(0,3), G)))
+  names(sim_data) = c("id","b0", "b1", "b2")
+  sim_data = left_join(sim_data, stress_data_all)
+  dat = tibble(id = rep(1:n, each = time_point), erorr = rnorm(n * time_point,0,sigmae), 
+                   age = rep(seq(from = step, to = 100, by = step), n),
+                   beta1 = rep(beta1,n * time_point), beta2 = rep(beta2,n * time_point)) %>% 
+    left_join(sim_data) %>% 
+    mutate(white_no_stress = b0 + (abs(b1) + beta1) * age + erorr, 
+           white = b0 + (abs(b1) + beta1) * age + (abs(b2) + beta2) * stress_window + erorr)
+  # thres = dat %>% filter(age==70) %>% select(white_no_stress) %>% 
+  #   pull() %>% quantile(probs = quantile_percent)
+  dat_binay_white = dat %>% 
+    mutate(white_binary_no_stress = white_no_stress > thres, white_binary_stress = white > thres)
+  dat_summary = dat_binay_white %>% group_by(age) %>% 
+    summarise(percentage_white = sum(white_binary_stress)/n)
+  return(list(full_dat = dat,percentage_dat = dat_summary,
+              thres = thres,stress_dat = stress_data))
+}
+
+
+#Preserve the data after the action button 'runsim'
+
+
+
+dat_sim = eventReactive(input$runsim,{
+  #get the stress input
+  stress_start = as.numeric(str_split(input$stress_start,",")[[1]])
+  stress_length = as.numeric(str_split(input$stress_length,",")[[1]])
+  stress_strength = as.numeric(str_split(input$stress_strength,",")[[1]])
+  #simulate the data
+  sim_data_generate(beta1 = input$beta1,beta2 = input$beta2,
+                    sigma1 = input$sigma1,sigma2 = input$sigma2,
+                    sigma3 = input$sigma3, sigmae = input$sigmae,
+                    rho12 = input$rho12,rho13 = input$rho13,
+                    rho23 = input$rho23,step = 0.1, 
+                    window_width = input$window_width,
+                    stress_start = stress_start,
+                    stress_strength = stress_strength,
+                    stress_length = stress_length,
+                    thres = input$thres,# quantile_percent = input$quantile_percent/100
+                    n = input$n, seed_num = input$seed_num)
+}, ignoreNULL=FALSE)
+
+
+
+```
+Simulation Plots
+=======================================================================
+
+
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+```{r}
+
+actionButton("runsim", "Run simulation",icon("paper-plane"), 
+    style="color: #fff; background-color: #337ab7; border-color: #2e6da4")
+
+sliderInput("beta1", 
+            tagList("\\( \\beta_{1} \\): Fixed rate of increase in aging factor (slope)"), 
+            min = 0, max = 20, 
+            value = 16)
+
+sliderInput("beta2", 
+            tagList("\\( \\beta_{2} \\): Fixed rate of hair sensitivity to stress (slope)"), 
+            min = 0, max = 20, 
+            value = 0)
+
+sliderInput("sigma1", 
+            tagList("\\( \\sigma_{0} \\): Standard deviation of initial aging factor value at age=0 "), 
+            min = 0, max = 50, 
+            value = 10)
+
+sliderInput("sigma2", 
+            tagList("\\( \\sigma_{1} \\): Standard deviation of aging factor rate across the lifespan "), 
+            min = 0, max = 50, 
+            value = 13)
+
+sliderInput("sigma3", 
+            tagList("\\( \\sigma_{2} \\): Standard deviation of hair sensitivity to stress rate "), 
+            min = 0, max = 50, 
+            value = 0)
+
+sliderInput("sigmae", 
+            tagList("\\( \\sigma_{e} \\): Standard deviation of measurement error"), 
+            min = 0, max = 50, 
+            value = 10)
+
+sliderInput("rho12", 
+            tagList("\\( \\rho_{01} \\): Correlation between initial aging factor value at age 0 (\\( b_i0 \\)) and aging factor rate across the lifespan (\\( b_i1 \\))"), 
+            min = 0, max = 1, 
+            value = 0)
+
+sliderInput("rho13", 
+            tagList("\\( \\rho_{02} \\): Correlation between initial aging factor value at age 0 (\\( b_i0 \\)) and hair sensitivity to stress rate (\\( b_i2 \\))"), 
+            min = 0, max = 1, 
+            value = 0)
+
+sliderInput("rho23", 
+            tagList("\\( \\rho_{12} \\): Correlation between aging factor rate across the lifespan (\\( b_i1 \\)) and hair sensitivity to stress rate (\\( b_i2 \\)) "), 
+            min = 0, max = 1, 
+            value = 0)
+
+sliderInput("window_width", 
+            tagList("Window width: Pre-set number of years accumulating stress before age of evaluation"),
+            min = 0, max = 10, 
+            value = 0)
+
+textInput("stress_start", 
+          tagList("Stress start time: The starting time for stress. For multiple stressors, please separate the different start time with ‘,’"), 
+          "0")
+
+textInput("stress_strength", 
+          tagList("Stress strenght: please separate the different stress strength with ‘,’"), 
+          "0")
+
+textInput("stress_length", 
+          tagList("Stress duration: please separate the different stress duration with ‘,’"), 
+          "0")
+# sliderInput("stress_length1", "Stress length1", min = 0, max = 20, 
+#             value = 0.1, step = 0.1)
+# sliderInput("stress_strength1", "Stress strength1", min = 0, max = 500, 
+#             value = 100)
+# 
+# sliderInput("stress_length2", "Stress length2", min = 0, max = 10, 
+#             value = 10, step = 0.1)
+# sliderInput("stress_strength2", "Stress strength2", min = 0, max = 500, 
+#             value = 50)
+
+
+
+
+numericInput('thres', tagList("Graying threshold"), 
+             value = 1920)
+# sliderInput("quantile_percent", 
+#             tagList("Threshold", helpPopup("The whiteloading threshold for hair turning white")), 
+#             min = 1, max = 99, 
+#             value = 75)
+sliderInput("n", 
+            tagList("N: Number of hairs in simulation"), 
+            min = 100, max = 1000, 
+            value = 1000)
+numericInput("seed_num", 
+             tagList("Simulation seed number"),
+             value = 2019)
+sliderInput("per_hair_show",
+            tagList("Percent of hairs to show in the white loading plot"),
+            min = 1, max = 100, value=10)
+
+
+
+```
+
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Hair graying trajectories
+
+```{r 1}
+renderPlotly({
+  
+  ggplotly(
+    dat_sim()$percentage_dat %>% 
+      ggplot(aes(x = age, y = percentage_white)) + geom_col(color = "light blue") +
+      theme_bw()  + scale_y_continuous(labels = scales::percent, limits = c(0,1)) + 
+      labs(y = "Proportion of gray hairs", x = "Age (years)")
+  )
+
+})
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Accumulation of aging factor in individual hairs
+
+```{r 2}
+renderPlot({
+  
+  
+  dat_sim()$full_dat %>% 
+    #sample certain amount of hair to display
+    filter(id %in% sample(1:input$n, round(input$n*(input$per_hair_show/100),0)) ) %>% 
+    ggplot(aes(x = age, y = white, group = id)) + 
+    geom_line(color = "light blue", alpha = 0.5)  +
+    geom_hline(yintercept=dat_sim()[[3]], 
+               color = "red") + theme_bw() + labs(y = "Aging Factor (A.U.)", x = "Age (years)")
+
+
+})
+```
+
+### Window of stress
+
+```{r 3}
+renderPlot({
+  
+  dat_sim()$stress_dat %>% 
+    ggplot(aes(x = age, y = stress_window)) + geom_line(color = "light blue") +
+    theme_bw() + labs(y = "Stress Window (A.U.)", x = "Age (years)")
+
+})
+
+
+```
+
+Download data
+=======================================================================
+
+
+
+Column {data-width=200}
+-----------------------------------------------------------------------
+### Percentage of white hair 
+```{r}
+downloadButton("downloadPer", "Download")
+downloadHandler(
+    filename = function() {
+      paste("percentage_data.csv")
+    },
+    content = function(file) {
+      write.csv(dat_sim()$percentage_dat, file, row.names = F)
+    }
+  )
+renderDataTable({
+  datatable(dat_sim()$percentage_dat,rownames = F)
+})
+
+```
+
+
+Column {data-width=200}
+-----------------------------------------------------------------------
+### Stress data
+```{r}
+downloadButton("downloadStress", "Download")
+downloadHandler(
+    filename = function() {
+      paste("stress_data.csv")
+    },
+    content = function(file) {
+      write.csv(dat_sim()$stress_dat, file, row.names = F)
+    }
+  )
+renderDataTable({
+  datatable(dat_sim()$stress_dat,rownames = F)
+})
+```
+
+Column {data-width=400}
+----------------------------------------------------------------------
+### Full simulation data
+```{r}
+downloadButton("downloadFull", "Download")
+downloadHandler(
+    filename = function() {
+      paste("full_data.csv")
+    },
+    content = function(file) {
+      write.csv(dat_sim()$full_dat, file, row.names = F)
+    }
+  )
+renderDataTable({
+  datatable(
+    (dat_sim()$full_dat %>% 
+    select(-white_no_stress) %>% 
+    rename(stress = stress_window)),
+    rownames = F
+  )  %>% formatRound(c(2:12),3)
+})
+
+```
+
+
+
+
+Details
+=======================================================================
+To simulate the graying process for a fixed person, we built a linear mixed model for the $i$th ($i=1,\ldots,\ n$) hair with two fixed effects ($\beta_1$ aging factor rate and $\beta_2$ hair sensitivity to stress rate) and three random effects ( $b_{i0}$ for initial aging factor value at age 0, $b_{i1}$ for aging factor rate across the lifespan and $b_{i2}$ for hair sensitivity to stress rate). We are taking the absolute value of these random effects because the slopes should be positive for age and accumulating stress. 
+$$AgingFactorValue_{\left\{i,\ age\right\}}=\left|b_{i0}\right|+\left(\left|b_{i1}\right|+\beta_1\right)age+\left(\left|b_{i2}\right|+\beta_2\right)AccumulatingStress_{\left\{age\right\}}+e_i$$
+
+Where AccumulatingStress is defined as:
+$$
+AccumulatingStress_{age}=\sum_{a=age-WindowWidth}^{age}{stress_a}
+$$
+
+The three random effects follow a multivariate normal:
+$$\left(b_{i0},b_{i1},b_{i2}\right)\sim N\left(0,G\right)$$
+with mean zero and a covariance structure:
+$$
+G=\left[\begin{matrix}\sigma_0^2&\rho_{01}\sigma_0\sigma_1&\rho_{02}\sigma_0\sigma_2\\\rho_{01}\sigma_1\sigma_0&\sigma_1^2&\rho_{12}\sigma_1\sigma_2\\\rho_{02}\sigma_2\sigma_0&\rho_{12}\sigma_2\sigma_1&\sigma_2^2\\\end{matrix}\right]
+$$
+All the correlation $\rho_{01},\rho_{02},\rho_{12}$ in the simulation are set to be positive.  
+When the AgingFactorValue for ith hair reach a predefined threshold, the ith hair will turn gray. 
+  
+  
+**Description for the parameters that could be changed (i is the fix person we are simulating)**  
+1. $\beta_1$:  Fixed rate of increase in aging factor (slope)  
+2. $\beta_2$:  Fixed rate of hair sensitivity to stress (slope)  
+3. $\sigma_0$:  Standard deviation of initial aging factor value at age 0 for $b_{i0}$  
+4. $\sigma_1$:  Standard deviation of aging factor rate across the lifespan for $b_{i1}$  
+5. $\sigma_2$:  Standard deviation of hair sensitivity to stress rate for $b_{i2}$  
+6. $\sigma_e$:  Standard deviation of measurement error for $e_i$  
+7. $\rho_{01}$: Correlation between initial aging factor value at age 0 ($b_{i0}$) and aging factor rate across the lifespan ($b_{i1}$)  
+8. $\rho_{02}$: Correlation between initial aging factor value at age 0 ($b_{i0}$) and hair sensitivity to stress rate ($b_{i2}$)  
+9. $\rho_{12}$: Correlation between aging factor rate across the lifespan ($b_{i1}$) and hair sensitivity to stress rate ($b_{i2}$)  
+10. Window width:  Pre-set number of years accumulating stress before age of evaluation.  
+11. Stress start time: The starting time for stress. For multiple stressors, please separate the different start time with ','    
+12. Stress strength: please separate the different stress strength with ','  
+13. Stress duration: please separate the different stress duration with ','  
+14. Threshold: The whiteloading threshold for hair turning white  
+15. N: Number of hairs in simulation  
+16. Seed number: Simulation seed number
+
+
+About
+=======================================================================
+This app was created by *Junting Ren and Todd Ogden*.  
+For more information please refer to the manuscript: Human Hair Graying is Naturally Reversible and Linked to Stress  
+Ayelet Rosenberg, Shannon Rausser, Junting Ren, Eugene Mosharov, R Todd Ogden, Clay Lacefield, Gabriel Sturm, Ralf Paus, Martin Picard
