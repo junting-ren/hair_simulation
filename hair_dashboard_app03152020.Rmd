@@ -1,5 +1,5 @@
 ---
-title: "Hair simulation"
+title: "Quantitative Mapping of Human Hair Greying and Reversal in Relation to Life Stress"
 output: 
   flexdashboard::flex_dashboard:
     orientation: columns
@@ -204,7 +204,7 @@ textInput("stress_length",
 
 
 
-numericInput('thres', tagList("Graying threshold"), 
+numericInput('thres', tagList("Greying threshold"), 
              value = 1920)
 # sliderInput("quantile_percent", 
 #             tagList("Threshold", helpPopup("The whiteloading threshold for hair turning white")), 
@@ -229,7 +229,7 @@ sliderInput("per_hair_show",
 Column {data-width=650}
 -----------------------------------------------------------------------
 
-### Hair graying trajectories
+### Hair greying trajectories
 
 ```{r 1}
 renderPlotly({
@@ -238,7 +238,7 @@ renderPlotly({
     dat_sim()$percentage_dat %>% 
       ggplot(aes(x = age, y = percentage_white)) + geom_col(color = "light blue") +
       theme_bw()  + scale_y_continuous(labels = scales::percent, limits = c(0,1)) + 
-      labs(y = "Proportion of gray hairs", x = "Age (years)")
+      labs(y = "Proportion of grey hairs", x = "Age (years)")
   )
 
 })
@@ -351,7 +351,7 @@ renderDataTable({
 
 Details
 =======================================================================
-To simulate the graying process for a fixed person, we built a linear mixed model for the $i$th ($i=1,\ldots,\ n$) hair with two fixed effects ($\beta_1$ aging factor rate and $\beta_2$ hair sensitivity to stress rate) and three random effects ( $b_{i0}$ for initial aging factor value at age 0, $b_{i1}$ for aging factor rate across the lifespan and $b_{i2}$ for hair sensitivity to stress rate). We are taking the absolute value of these random effects because the slopes should be positive for age and accumulating stress. 
+To simulate the greying process for a fixed person, we built a linear mixed model for the $i$th ($i=1,\ldots,\ n$) hair with two fixed effects ($\beta_1$ aging factor rate and $\beta_2$ hair sensitivity to stress rate) and three random effects ( $b_{i0}$ for initial aging factor value at age 0, $b_{i1}$ for aging factor rate across the lifespan and $b_{i2}$ for hair sensitivity to stress rate). We are taking the absolute value of these random effects because the slopes should be positive for age and accumulating stress. 
 $$AgingFactorValue_{\left\{i,\ age\right\}}=\left|b_{i0}\right|+\left(\left|b_{i1}\right|+\beta_1\right)age+\left(\left|b_{i2}\right|+\beta_2\right)AccumulatingStress_{\left\{age\right\}}+e_i$$
 
 Where AccumulatingStress is defined as:
@@ -366,7 +366,7 @@ $$
 G=\left[\begin{matrix}\sigma_0^2&\rho_{01}\sigma_0\sigma_1&\rho_{02}\sigma_0\sigma_2\\\rho_{01}\sigma_1\sigma_0&\sigma_1^2&\rho_{12}\sigma_1\sigma_2\\\rho_{02}\sigma_2\sigma_0&\rho_{12}\sigma_2\sigma_1&\sigma_2^2\\\end{matrix}\right]
 $$
 All the correlation $\rho_{01},\rho_{02},\rho_{12}$ in the simulation are set to be positive.  
-When the AgingFactorValue for ith hair reach a predefined threshold, the ith hair will turn gray. 
+When the AgingFactorValue for ith hair reach a predefined threshold, the ith hair will turn grey. 
   
   
 **Description for the parameters that could be changed (i is the fix person we are simulating)**  
@@ -391,5 +391,5 @@ When the AgingFactorValue for ith hair reach a predefined threshold, the ith hai
 About
 =======================================================================
 This app was created by *Junting Ren and Todd Ogden*.  
-For more information please refer to the manuscript: Human Hair Graying is Naturally Reversible and Linked to Stress  
+For more information please refer to the manuscript: Quantitative Mapping of Human Hair Greying and Reversal in Relation to Life Stress  
 Ayelet Rosenberg, Shannon Rausser, Junting Ren, Eugene Mosharov, R Todd Ogden, Clay Lacefield, Gabriel Sturm, Ralf Paus, Martin Picard
